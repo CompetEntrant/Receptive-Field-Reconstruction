@@ -1,1 +1,112 @@
+%RF Field Recreation
 
+%%Introduction
+%Run RandomDots.m
+
+%% 1: Raster plot of key neurons
+close all
+hold on
+neuronindex=[9, 23, 42, 52, 59, 62, 75, 76, 79, 83];
+%n=length(neuronindex)
+n=4;
+for NeuronNum = n:n
+    index={[neuronindex(NeuronNum)]};
+    cua1401_spk_spikeRaster_AKS_sorted_drumDRG(index)
+end
+hold off
+%% 2: 32 subplots of receptive fields as a function of time lag
+delay=-100:100:3000;
+frames = S;
+times = L2_str.timing{1}.trialTiming;
+fix = (times ~= 0);
+times = times(fix);
+frames = frames(:,:,fix);
+STRF = cell(1,n);
+midpt = 0.875;
+rvals = [linspace(0,midpt,64)';linspace(midpt,1,64)'];%Set up custom colormap
+gvals = [linspace(0,midpt,64)';linspace(midpt,0,64)'];
+bvals = [linspace(1,midpt,64)';linspace(midpt,0,64)'];
+redblue = [rvals gvals bvals];
+figureindex=1;figure(figureindex)
+tic;
+for NeuronNum = 1:10
+    figureindex=figureindex+1; figure(figureindex)
+    data = retinaData.spikes{neuronindex(NeuronNum)};
+    timeshift = zeros(1,length(data));
+    avgpattern = zeros(40,40,32);
+    hold on 
+    for delaylength = 1:length(delay)
+        timeshift = data-delay(delaylength);
+        averageframe = zeros(40,40);
+        bincounts = histc(timeshift, times);
+        for x = 1:length(times)
+            averageframe = averageframe + frames(:,:,x) * bincounts(x);
+        end
+        averageframe = (averageframe / length(timeshift)) - .5;
+        avgpattern(:,:,delaylength) = averageframe;
+        subplot(6,6,delaylength)
+        imagesc(averageframe, [-.1,.1])
+        colormap(redblue)
+        title(num2str(delay(delaylength)));
+    end
+    STRF{NeuronNum} = avgpattern;
+    NeuronNum %#ok<NOPTS> %give feedback on neuron being looked at, 45s per neuron
+end
+toc
+
+%% 3: Gaussian fit
+for NeuronNum=1:10
+x = repmat((1:40),[40,1]);y = x.';
+xdata = cat(3,x,y);
+x0=[20,20,40,40,1];
+gauss=@(x0, xdata) x0(5)*exp(-((xdata(:,:,1)-x0(1)).^2/(2*x0(3)) + (xdata(:,:,2)-x0(2)).^2/(2*x0(4))));
+opts = optimset('Display','off');
+lb = ones(1,5)*-100;
+ub = ones(1,5)* 100;
+
+xfinal = cell(1,10);
+xfin = zeros(1,5);
+
+widths = zeros(1,10);
+offdelay = 0;
+ondelay = 0;
+offs = [1 2 4 5 6 7 8];
+ons = [3 10];
+    figureindex=figureindex+1; figure(figureindex)
+    data = STRF{NeuronNum};
+    ydata = data(:,:,10);
+    xfin = lsqcurvefit(gauss,x0,xdata,ydata,lb, ub, opts);
+
+    xfinal{NeuronNum} = xfin;
+
+    amplitudes = zeros(1,32);
+    gauss = @(e, xdata) e*exp(-((xdata(:,:,1)-xfin(1)).^2/(2*xfin(3)) + (xdata(:,:,2)-xfin(2)).^2/(2*xfin(4))));
+    for x = 1:32
+        amplitudes(x) = lsqcurvefit(gauss, xfin(5), xdata, data(:,:,x),-100, 100, opts);
+    end
+    
+hold on %Set up subplots
+subplot(1,3,1)
+imagesc(ydata, [-.1,.1])
+title('Experimental Receptive Field');
+subplot(1,3,2)
+imagesc(gauss(xfin(5), xdata), [-max(abs(amplitudes)),max(abs(amplitudes))])
+title('Receptive Field Model')
+subplot(1,3,3)
+plot(delay,amplitudes)
+title('Time Course of RF')
+xlabel('Time(1/10 ms)')
+ylabel('Amplitude of Receptive Field')
+xlim([-100, 3000])
+    
+widths(NeuronNum) = mean([xfin(3), xfin(4)]);
+    
+if ismember(NeuronNum, offs)
+    offdelay=offdelay + amplitudes(amplitudes == min(amplitudes(1:11)));
+end
+if ismember(NeuronNum,ons);
+    ondelay = ondelay + amplitudes(amplitudes == max(amplitudes(1:11)));
+end
+colormap(redblue)%Custom colormap
+end
+clc
