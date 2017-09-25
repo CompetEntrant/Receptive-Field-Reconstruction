@@ -1,0 +1,400 @@
+function [rasterall]=cua1401_spk_spikeRaster_AKS_sorted_drum(electrodeMatrix, animal, protocol, protocolNumber, mapElectrodes, trialsToDisplay,shouldPlotWaves , L2FolderLoad, mapPath, nevStruct)
+
+% Default inputs
+if (nargin < 1)
+    electrodeMatrix     = {[9]};
+end
+if (nargin < 2)
+    animal              = 'DRG';
+end
+if (nargin < 3)
+    protocol            = 'RandomDots';
+end
+if (nargin < 7)
+    shouldPlotWaves     = false;
+end
+if (nargin < 5)
+    mapElectrodes   	= false;
+end
+if (nargin < 6)
+    trialsToDisplay   	= 250;
+end
+if (nargin < 4)
+    protocolNumber      = 1;
+end
+if (nargin < 8)
+    L2FolderLoad        = 'C:\users\';
+end
+if (nargin < 9)
+    %NEVFolderLoad        = 'C:\';
+    NEVFolderLoad        = 'C:\users\';
+end
+if (nargin < 10)
+    mapPath             = '----';
+end
+  if (nargin < 11)
+      shouldBrowseForNEV 	= true;
+  else
+      shouldBrowseForNEV 	= false;
+  end
+
+% Constants
+if (~strcmp(protocol,'noise2'))
+PadBegTime          = 0.5;
+PadEndTime          = 0.5;
+MaxElectrode        = 32;
+else
+PadBegTime          = 1;
+PadEndTime          = 1;
+MaxElectrode        = 32;
+end
+
+% Waveform constants
+WaveformTimeBegin   = 0.2;
+WaveformTimeEnd     = 0.5;
+selectedTrial       = 5;
+
+
+ %Browse for sev file if specified
+  if (shouldBrowseForNEV)
+    [nevFilename, ~, nevFile]                           = file_browse ([NEVFolderLoad '\*' animal '*.nev'], 'Select nev file');
+    nevStruct                                           = openNEV(nevFilename, 'read');
+  end
+
+%nevStruct=openNEV('Pinch_neuraldata_20141205T124358.nev','read');
+%nevFile='Pinch_neuraldata_20141205T124358.nev';
+
+
+% Load the NEV cereport numbers
+%ids                 = extractfield(nevStruct.ElectrodesInfo, 'ElectrodeID')';
+%banks               = extractfield(nevStruct.ElectrodesInfo, 'ConnectorBank')';
+%channels            = extractfield(nevStruct.ElectrodesInfo, 'ConnectorPin')';
+%cereportNums        = (0 * strcmp(banks, 'A')) + (32 * strcmp(banks, 'B')) + (64 * strcmp(banks, 'C')) + (96 * strcmp(banks, 'D')) + (128 * strcmp(banks, 'E')) + double(channels);
+
+% Load the electrode mapping
+% [cereportNum elecSortIndes]                     = sort(cereportNum);
+elec                                            = [1:32];
+
+% Load corresponding L2 structure
+if (~exist([L2FolderLoad '\' animal '_' protocol '.mat'], 'file'))
+    disp(['L2 data structure does not exist for protocol: ' protocol '. Unable to load structure.']);
+    return
+else
+    % Load existing L2 structure
+    load([L2FolderLoad '\' animal '_' protocol], 'L2_str');
+end
+
+% Extract channels, timestamps, and electrodes
+sampleRate          = double(nevStruct.MetaTags.TimeRes);
+numChannels         = max(nevStruct.Data.Spikes.Electrode);
+timeStamps      	= double(nevStruct.Data.Spikes.TimeStamp) / sampleRate;
+electrodes          = nevStruct.Data.Spikes.Electrode;
+units               = nevStruct.Data.Spikes.Unit;
+
+% Remap the electrodes (if specified)
+if (mapElectrodes)
+    electrodes    	= elec(electrodes);
+end
+
+% Extract the digital markers
+[markerStruct]      = psd1701_shaker_spk_parseNevDigital(nevStruct, false);
+numProts            = length(markerStruct.protocolBeginTimes);
+
+% Find the nev file date
+dateSpaceLocs       = strfind(nevStruct.MetaTags.DateTime, ' ');
+fileDate            = nevStruct.MetaTags.DateTime(1:dateSpaceLocs(1)-1);
+L2DateStrs          = extractfield(L2_str, 'date');
+L2Dates             = char(L2DateStrs{1});
+L2Indices           = find(floor(datenum(L2Dates)) == floor(datenum(fileDate)));
+
+% Select relevant protocols from L2 structure
+protList    = [];
+protL2Index = [];
+%for (protNum = 1:length(L2Indices))
+    %if (L2_str.spikesorterInfo{L2Indices(protNum)}.confidence > 50)
+       % protList    = [protList L2_str.spikesorterInfo{L2Indices(protNum)}.protNumber];
+        %protL2Index = [protL2Index L2Indices(protNum)];
+   % end
+%end
+
+% Verify that protocols were found
+%if (isempty(protList))
+    %disp(['Failed to find any protocols on the specified date (' fileDate ') to match: ' protocol]);
+    %return;
+%end
+
+unit_var=unique(units);
+
+
+for (unit_num = 1:(length(unit_var)-2))
+    
+    electrodesSubSet = electrodeMatrix{1};
+    
+    % Extract specified electrodes
+    elecIndices         = zeros(1, length(electrodes));
+    for (electrodeNum = 1:length(electrodesSubSet))
+        elecIndices = elecIndices | (electrodes == electrodesSubSet(electrodeNum)  & units==unit_num );;
+    end
+    
+    % Extract specified electrodes and corresponding spike times
+    validElectrodes     = electrodes(elecIndices);
+    validTimeStamps     = timeStamps(elecIndices);
+    validWaveforms      = nevStruct.Data.Spikes.Waveform(:,elecIndices);
+    
+    % Plot rasters for each protocol on a trial by trial basis
+    %for (protPtr = 1:length(protList))
+        
+        protNum         =       1 ;                   %protList(protPtr);
+        %protIndex       = protL2Index(protPtr);
+        protIndex       = protocolNumber;
+        
+        % Only examine protocols with at least 5 trials
+        if (markerStruct.trialCounts(protNum) > 5 )%&& strcmp(nevFile(1:end-4), L2_str.spikesorterInfo{protIndex}.filename(1:end-4)))
+            
+            % Open a figure for the current protocol
+             figureh=figure(unit_num);
+            %clf
+            hold on
+            xlabel('Trial Times (s)');
+            ylabel('Trial Numbers');
+            set(gca, 'YDir', 'reverse')
+            
+            % Determine the electrode timestamps relevant to the current protocol
+            trialBegIndex                   = markerStruct.fullTrialIndices(protNum);
+            trialEndIndex                   = markerStruct.fullTrialIndices(protNum) + markerStruct.fullTrialCounts(protNum) - 1;
+            minProtTime                     = markerStruct.fullTrialBeginTimes(trialBegIndex) - PadBegTime;   
+            maxProtTime                     = markerStruct.fullTrialEndTimes(trialEndIndex)   + PadEndTime;
+            protIndices                     = validTimeStamps >= minProtTime & validTimeStamps <= maxProtTime;
+            protTimeStamps                  = validTimeStamps(protIndices);
+            protElectrodes                  = validElectrodes(protIndices);
+            protWaveforms                   = validWaveforms(:,protIndices);
+            protTrialBeginPads              = markerStruct.stimBeginTimes(trialBegIndex:trialEndIndex) - PadBegTime;  %fullStimBeginTimes   
+            protTrialEndPads                = markerStruct.stimEndTimes(trialBegIndex:trialEndIndex)   + PadEndTime;   %fullStimEndTimes
+            
+            % Determine the protocol trial numbers
+            protTrialNumbers                = 1:markerStruct.fullTrialCounts(protNum);
+            
+            % Find the fields for responses, trial numbers and electrodes
+            indentationIndex                 	= strmatch('indentation1', char(L2_str.attributes{protIndex}.names), 'exact');
+            trialNumIndex                       = strmatch('trialNumbers', char(L2_str.attributes{protIndex}.names), 'exact');
+            sineAmp                              = strmatch('sineAmp', char(L2_str.attributes{protIndex}.names), 'exact');
+            sineFreq                              = strmatch('sineFreq', char(L2_str.attributes{protIndex}.names), 'exact');
+            lowFreq                              = strmatch('lowFreq', char(L2_str.attributes{protIndex}.names), 'exact');
+            highFreq                              = strmatch('highFreq', char(L2_str.attributes{protIndex}.names), 'exact');
+            noiseAmp                              = strmatch('noiseAmp', char(L2_str.attributes{protIndex}.names), 'exact');
+            %indentation1Index              	= strmatch('indentation1', char(L2_str.attributes{protIndex}.names), 'exact');
+            %indentation2Index              	= strmatch('indentation2', char(L2_str.attributes{protIndex}.names), 'exact');
+            
+            % Undo the sort so that trial numbers are in order
+            %trialAttribs                    = sortrows(L2_str.attributes{protIndex}.attribs, trialNumIndex);
+            
+           completedAttribs         	= L2_str.attributes{protIndex}.attribs;
+        end
+        
+        % Renumber the attribute trials
+        % completedAttribs(:, trialNumIndex)= protTrialNumbers';
+        
+        % Sort the attributes based on indentations and electrodes used
+        %if strcmp(protocol,'sine1')
+             %[sortedAttribs, sortIndices]  	= sortrows(completedAttribs, [ sineFreq sineAmp ]);  %sine1
+        %else
+        %[sortedAttribs, sortIndices]  	= sortrows(completedAttribs, [(-1)*lowFreq (-1)* highFreq (-1)* noiseAmp]);  %noise
+        %end
+        
+        %[sortedAttribs, sortIndices]  	= sortrows(completedAttribs, [(-1)*x1 (-1)* y1 (-1)* indentation1]);
+        
+        
+        % Determine stimulation electrodes
+        % stimElecs                       = unique(sortedAttribs(:, electrodeIndex));
+        %stimElecs                       = stimElecs(stimElecs >= 0);
+        
+        % Title the figure
+        %title(['Protocol ' num2str(protNum) ', Stimulation Electrode: ' num2str(electrodesSubSet(electrodeNum))]);
+        
+      
+        % Plot the raster (zeroed at first stimulus)
+        
+        for (trialPtr = 1:markerStruct.fullTrialCounts(protNum))
+            
+            % Determine the trial number from the sorted attributes
+            trialNum            =  trialPtr;                     %sortedAttribs(trialPtr, trialNumIndex);
+            
+            % Determine the index of the trial
+            trialLoc            = find(protTrialNumbers == trialNum);
+            trialIndex         	= trialBegIndex + trialLoc - 1;
+            
+            stimIndex           = markerStruct.fullStimIndices(trialIndex);
+            trialSpikeIndices   = protTimeStamps >= protTrialBeginPads(trialLoc) & protTimeStamps <= protTrialEndPads(trialLoc);
+            trialSpikeTimes     = protTimeStamps(trialSpikeIndices) - markerStruct.fullStimBeginTimes(stimIndex);
+            if (shouldPlotWaves)
+                if (trialPtr == selectedTrial)
+                    trialWaveforms        = protWaveforms(:,trialSpikeIndices);
+                    waveformTimeIndices   = trialSpikeTimes >= WaveformTimeBegin & trialSpikeTimes <= WaveformTimeEnd;
+                end
+            end
+            [xTimes, yTrials]   = createRasterTickArray(trialSpikeTimes, repmat(trialPtr, 1, length(trialSpikeTimes)), 0.5);
+            
+            % Plot the stim begin and end markers
+            for (stimNum = 1:markerStruct.fullStimCounts(trialIndex))
+                stimPrt         = stimIndex + stimNum - 1;
+                stimStart       = markerStruct.fullStimBeginTimes(stimPrt) - markerStruct.fullStimBeginTimes(stimIndex);
+                stimEnd         = markerStruct.fullStimEndTimes(stimPrt) - markerStruct.fullStimBeginTimes(stimIndex);
+                plot([stimStart stimStart], [trialPtr - 1 trialPtr], 'b');
+                plot([stimEnd stimEnd], [trialPtr - 1 trialPtr], 'k');
+            end
+            
+            % Plot the raster
+            %if (~strcmp(protocol,'noise2'))
+            colorz=lines(markerStruct.fullTrialCounts(protNum));
+            %y=repmat(1:markerStruct.fullTrialCounts(protNum),[5]);
+            %y=y(:);  
+            %else
+                %colorz=cool(markerStruct.fullTrialCounts(protNum)/2);
+                %y=repmat(1:markerStruct.fullTrialCounts(protNum),[2]);
+                  %y=y(:);  
+            %end
+                
+            plot(xTimes, yTrials, 'Color',colorz((trialPtr),:));
+           title(['Channel ',int2str(electrodeMatrix{1}),'_',int2str(unit_num)]);
+            rasterall{unit_num}{trialPtr}=[unique(xTimes(~isnan(xTimes)))];
+            
+        end  
+        
+         filename=['C:\Users\somlab\Documents\MATLAB\Channel_',int2str(electrodeMatrix{1}),'unit',int2str(unit_num),'.png'];
+        print(figureh,'-dpng',filename);
+         
+     
+    end
+    hold off
+    if (shouldPlotWaves)
+        plotWaveforms(trialWaveforms, waveformTimeIndices, sampleRate, selectedTrial);
+    end
+%end
+
+%if (elecSubsetNum < length(electrodeMatrix))
+    %pause
+%end
+
+function [xOut yOut] = createRasterTickArray(xIn, yIn, tickHeight)
+xOut    = zeros(1, length(xIn) * 3);
+yOut    = zeros(1, length(yIn) * 3);
+
+xOut(1:3:end)   = xIn;
+xOut(2:3:end)   = xIn;
+xOut(3:3:end)   = NaN;
+
+yOut(1:3:end)   = yIn - tickHeight;
+yOut(2:3:end)   = yIn + tickHeight;
+yOut(3:3:end)   = NaN;
+
+return
+
+    function plotWaveforms(waveforms, indices, sampleRate, trialNum)
+        waveformsWindow = waveforms(:,indices);
+        x = ([1:size(waveformsWindow, 1)]/sampleRate)*1000;
+        
+        %plot individual waveforms overlaid
+        figure(10)
+        for waveIndex = 1:size(waveformsWindow, 2)
+            plot(x, waveformsWindow(:, waveIndex), 'k');
+            hold on
+        end
+        xlabel('time (milliseconds)')
+        ylabel('potential (uV)')
+        title(['Waveforms Individual, Trial ' num2str(trialNum)])
+        hold off
+        
+        % plot average of selected waveforms
+        figure(11)
+        waveformsAverage = mean(waveformsWindow, 2);
+        plot(x, waveformsAverage, 'k')
+        xlabel('time (milliseconds)')
+        ylabel('potential (uV)')
+        title(['Waveform Average, Trial ' num2str(trialNum)])
+        return
+        
+        function viewMap(protNum, markerStruct, timeStamps, electrodes, MaxElectrode)
+            numTrials       = 10;
+            trialBegIndex  	= markerStruct.fullTrialIndices(protNum);
+            minCutTime      = markerStruct.fullTrialBeginTimes(trialBegIndex);
+            maxCutTime      = markerStruct.fullTrialEndTimes(trialBegIndex + numTrials - 1);
+            chunkSize       = 1.1;
+            numChunks       = ceil((maxCutTime - minCutTime) / chunkSize);
+            chunkTime       = minCutTime + 0.5;
+            totalLength     = numChunks * chunkSize;
+            rows            = repmat(1:10, 10, 1);
+            rows            = rows(:);
+            cols            = repmat(1:10, 1, 10)';
+            
+            chunkIndices                	= timeStamps >= minCutTime & timeStamps <= maxCutTime;
+            chunkTimeStamps                 = timeStamps(chunkIndices);
+            chunkElectrodes               	= electrodes(chunkIndices);
+            for (elecNum = 1:MaxElectrode);
+                elecIndices                         = (chunkElectrodes == elecNum);
+                elecSpikeTimes                      = chunkTimeStamps(elecIndices); % - markerStruct.fullStimBeginTimes(stimIndex);
+                elecFireBase(elecNum)               = length(elecSpikeTimes) / numChunks;
+            end
+            
+            figure(40)
+            clf
+            subplot('Position', [0.1 0.1 0.8 0.1]);
+            hold on
+            plot([minCutTime minCutTime + totalLength], [1 1]);
+            
+            for (trialPtr = 1:numTrials)
+                
+                trialIndex         	= trialBegIndex + trialPtr - 1;
+                stimIndex           = markerStruct.fullStimIndices(trialIndex);
+                
+                % Plot the stim begin and end markers
+                for (stimNum = 1:markerStruct.fullStimCounts(trialIndex))
+                    stimPrt         = stimIndex + stimNum - 1;
+                    stimStart       = markerStruct.fullStimBeginTimes(stimPrt); % - markerStruct.fullStimBeginTimes(stimIndex);
+                    stimEnd         = markerStruct.fullStimEndTimes(stimPrt); % - markerStruct.fullStimBeginTimes(stimIndex);
+                    plot([stimStart stimStart], [0 MaxElectrode], 'g');
+                    plot([stimEnd stimEnd], [0 MaxElectrode], 'r');
+                end
+            end
+            
+            hold off
+            
+            for (chunkNum = 1:numChunks)
+                chunkIndices                	= timeStamps >= chunkTime & timeStamps <= (chunkTime + chunkSize);
+                chunkTimeStamps                 = timeStamps(chunkIndices);
+                chunkElectrodes               	= electrodes(chunkIndices);
+                for (elecNum = 1:MaxElectrode);
+                    elecIndices                         = (chunkElectrodes == elecNum);
+                    elecSpikeTimes                      = chunkTimeStamps(elecIndices); % - markerStruct.fullStimBeginTimes(stimIndex);
+                    elecFireMean(chunkNum, elecNum)  	= length(elecSpikeTimes) - elecFireBase(elecNum);
+                    if (elecFireMean(chunkNum, elecNum) < 40)
+                        elecFireMean(chunkNum, elecNum) = 0;
+                    end
+                end
+                
+                z           = [elecFireMean(chunkNum, :) zeros(1, 4)]';
+                data        = sortrows([rows cols z], [2 1]);
+                movHandel   = figure(40);
+                
+                
+                subplot('Position', [0.1 0.1 0.8 0.1]);
+                hold on
+                plot(chunkTime, 1, 'r.');
+                hold off
+                
+                subplot('Position', [0.1 0.3 0.6 0.6]);
+                image(reshape(data(:, 3), 10, []));
+                set(gca,'YDir','normal');
+                axis square
+                
+                M(chunkNum) = getframe(movHandel);
+                
+                %pause;
+                
+                chunkTime   = chunkTime + chunkSize;
+            end
+            
+            pause
+            movie(M)
+            
+            return
+            
