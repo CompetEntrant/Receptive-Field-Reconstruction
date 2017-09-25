@@ -1,0 +1,54 @@
+% generate_circular_data.m
+
+strip_len = 160;   % length of random dot strip in mm
+strip_wid = 50.8;  % width of random dot strip in mm
+bins_per_mm = 100; % resolution of RF calculation
+dot_diam = 0.5;    % diameter of dot top in mm
+vel = 80;          % speed in mm/s
+trans = 0.4;       % translation in mm
+
+
+load rand_loc.mat
+
+% generate stimulus matrix
+len = dot_diam*bins_per_mm;
+circ = zeros(len+1);
+X = repmat([0:len]',1,len+1);
+Y = repmat([0:len],len+1,1);
+DIST = sqrt((X-len/2).^2 + (Y-len/2).^2);
+circ(DIST<=dot_diam/2*bins_per_mm) = 1;
+
+S = zeros(strip_len*bins_per_mm,strip_wid*bins_per_mm);
+loc = ceil(loc*bins_per_mm);
+
+% make sure no dots hang over the edge
+ind_loc = loc(:,1)<len/2 | loc(:,1)>strip_len*bins_per_mm-len/2 | loc(:,2)<len/2 | loc(:,2)>strip_wid*bins_per_mm-len/2;
+loc(ind_loc,:) = [];
+
+for d=1:size(loc,1)
+    S(loc(d,1)-len/2:loc(d,1)+len/2,loc(d,2)-len/2:loc(d,2)+len/2) = S(loc(d,1)-len/2:loc(d,1)+len/2,loc(d,2)-len/2:loc(d,2)+len/2) + circ;
+end
+S = double(S>0);
+
+
+%% estimate receptive field
+
+offset = RFsize/2*bins_per_mm;
+
+[row,col] = find(spikes);
+num_spikes = length(row);
+RFest = zeros(RFsize*bins_per_mm);
+for s=1:num_spikes
+    RFest = RFest + S(row(s):row(s)+RFsize*bins_per_mm-1,trans_idx(col(s)):trans_idx(col(s))+RFsize*bins_per_mm-1);
+end
+RFest = RFest/length(row);
+
+%% plot results
+
+figure
+imagesc(RFest)
+title(['Speed: ' num2str(vel) ' mm/s, Translation: ', num2str(trans), ' mm, Spikes: ' num2str(num_spikes) ' (' num2str(avg_rate) ' Hz), Time: ' num2str(num_trans*(strip_len/vel + 3.5)/60) ' min'])
+
+
+
+
